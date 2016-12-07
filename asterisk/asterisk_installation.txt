@@ -1,0 +1,35 @@
+Asterisk Installation
+
+1.raspbx choosen
+I have choosen to run Asterisk on a raspberry pi 3 ( choice of raspberry is also for other domotic applications). 
+I have also choosen the RASPBX distribution to still have a raspbian distribution but with asterisk and freepbx already installed.
+
+2. raspbx installation.
+ - download raspbx imag in raspbx internet site.
+ - deflate the zip file:
+	gunzip unzip raspbx-****.zip
+ - plug sd card on the computer
+ - launch dmesg command to know what partitions is mounted
+ 	dmesg
+ - umount them
+	umount /dev/sdx1 (x is letter you find with dmesg message)
+	umount /dev/sdx2 if it exists
+ - copy image on sd card
+	sudo dd bs=4M status=progress if=raspbx-06-03-2016.img of=/dev/sdx
+ - don't forget to lauch sync command
+	sudo sync
+ - insert sd card in raspberry and switch ON it
+ 
+I use ssh connection to configure raspbx
+
+ - on a terminal connect by ssh
+	ssh root@x.x.x.
+	password is raspberry
+ - upgrade versionof raspbx
+	raspbx-upgrade
+ - expand filesystem
+	raspi-config
+	expand filesystem
+	reboot
+
+
