@@ -65,11 +65,15 @@ void loop()
 {
   // on demande la valeur à l'autre noeud
   request(CHILD_SENSOR_ID_SEND, V_TEMP, NODE_CAPTEUR_TEST2);
+  
+  // on envoie les valeurs des fils au controlleur
   send(msg.setSensor(0).set(temperatureLu, 1));
   send(msg.setSensor(CHILD_SENSOR_ID_SEND).set(temperatureEnvoyee, 1));
   
   wait(60000);
 }
+
+
 
 
 
