@@ -41,7 +41,7 @@
 #define NODE_CAPTEUR_TEST1 51
 #define NODE_CAPTEUR_TEST2 52
 #define CHILD_SENSOR_ID_SEND 1
-#define MY_NODE_ID NODE_CAPTEUR_TEST1
+#define MY_NODE_ID NODE_CAPTEUR_TEST2
 
 #include <SPI.h>
 #include <MySensors.h>
@@ -64,7 +64,7 @@ void presentation() {
 void loop()
 {
   // on demande la valeur à l'autre noeud
-  request(CHILD_SENSOR_ID_SEND, V_TEMP, NODE_CAPTEUR_TEST2);
+  request(CHILD_SENSOR_ID_SEND, V_TEMP, NODE_CAPTEUR_TEST1);
   
   // on envoie les valeurs des fils au controlleur
   send(msg.setSensor(0).set(temperatureLu, 1));
@@ -72,6 +72,12 @@ void loop()
   
   wait(60000);
 }
+
+void receive(const MyMessage &message)
+{
+  
+}
+
 
 
 
