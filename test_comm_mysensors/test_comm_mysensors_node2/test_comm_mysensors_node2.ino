@@ -66,6 +66,7 @@ void loop()
   // on demande la valeur à l'autre noeud
   request(CHILD_SENSOR_ID_SEND, V_TEMP, NODE_CAPTEUR_TEST1);
   
+  
   // on envoie les valeurs des fils au controlleur
   send(msg.setSensor(0).set(temperatureLu, 1));
   send(msg.setSensor(CHILD_SENSOR_ID_SEND).set(temperatureEnvoyee, 1));
@@ -75,7 +76,12 @@ void loop()
 
 void receive(const MyMessage &message)
 {
-  
+  if(message.type == V_TEMP && message.sender != 0)
+  {
+      Serial.print("Node "); Serial.print(message.sender); 
+      Serial.print(" Commandtype: "); Serial.print(message.getCommand());
+      Serial.println(" valeur: ");Serial.print(message.getFloat());
+  }
 }
 
 
