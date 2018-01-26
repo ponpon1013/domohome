@@ -173,11 +173,16 @@ void loop() {
   // Send locally attech sensors data here
   ArduinoOTA.handle();
 
-}
+  
+ }
 
 
 void receive(const MyMessage &message){
   Serial.println("Message reçu");
+  Serial.print("envoyeur:"); Serial.println(message.sender);
+  Serial.print("type:"); Serial.println(message.type);
+  Serial.print("senseur:"); Serial.println(message.sensor);
+  Serial.print("valeur:"); Serial.println(message.getFloat());
 }
 
 
