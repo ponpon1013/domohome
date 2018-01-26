@@ -83,8 +83,12 @@ void loop(void)
     if (temperature != -127.00 && temperature != 85.00) {
     #endif
  
-      // Send in the new temperature
-     send(msg.setSensor(0).set(temperature,1));
+      // Send in the new temperature to controller
+     send(msg.setSensor(0).set(temperature,1).setDestination(0));
+
+     // Send in the new temperature to gateway which is also sensors chauffe-eau-solaire
+     
+     
      wait(MY_DEFAULT_LED_BLINK_PERIOD); //on attend que les diodes s'éteignent
      lastTemperature[0]=temperature;
        
