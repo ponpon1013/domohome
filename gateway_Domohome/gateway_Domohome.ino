@@ -136,7 +136,30 @@
   #include <ESP8266WiFi.h>
 #endif
 
+// fichier en tête gerant les numero de neoud du systeme
+#include "domohome.h"
+
+//variable temperatureCapteurSolaire provenant du noeud Capteusolaire (numero neoud dans fichier domohome.h)
+float TempCaptSolaire=15.0; // 15.0 valeur par defaut
+// variable tempDernierEnvoiTempCaptSolaire qui sait la derniere fois qu'on a eu l'info de TempCaptSolaire
+long tempDernierEnvoiTempCaptSolaire;
+// contante temps à ne pas dépasser sans reception de TempCaptSolaire
+#define TEMP_MAX_RECEPTION_CAPTEUR_SOLAIRE 1800000.0 //1800000=30 mn
+
 #include <MySensors.h>
+
+//fonction qui verifie que le dernier envoi de capteur solaire n'est pas trop ancien
+bool TestTempEnvoieCaptSoalire()
+{
+   if((millis() - tempDernierEnvoiTempCaptSolaire) > TEMP_MAX_RECEPTION_CAPTEUR_SOLAIRE)
+   {
+     return false;
+   }
+   else
+   {
+    return true;
+   }
+}
 
 void setup() { 
   
@@ -162,10 +185,15 @@ void setup() {
   Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
 
+  //initilaisation de tempDernierEnvoiTempCaptSolaire
+  tempDernierEnvoiTempCaptSolaire=millis();
 }
 
 void presentation() {
-  // Present locally attached sensors here    
+  // Present locally attached sensors here
+
+  // senseur virtuel qui indique si la derniere recpetion de capteur soalire est trop ancienne
+  present(S_TEMP_CAPT_SOLAIRE_VALIDE, S_TEMP);
 }
 
 
@@ -173,7 +201,10 @@ void loop() {
   // Send locally attech sensors data here
   ArduinoOTA.handle();
 
-  
+  //lance la vérification de la validité de tempcaptsolaire
+  // si valide on envoie au controller vali sinon non-valide
+  MyMessage msgValTempCaptSolaire(S_TEMP_CAPT_SOLAIRE_VALIDE,V_STATUS);
+  send(msgValTempCaptSolaire.set(TestTempEnvoieCaptSoalire()));
  }
 
 
@@ -183,6 +214,13 @@ void receive(const MyMessage &message){
   Serial.print("type:"); Serial.println(message.type);
   Serial.print("senseur:"); Serial.println(message.sensor);
   Serial.print("valeur:"); Serial.println(message.getFloat());
+
+  if (message.sender==201 && message.type==V_TEMP) // message venant de capteurSolaire
+  {
+    TempCaptSolaire=message.getFloat();
+    //on reinitialise la nouvelle date de réception de capteur solaire
+    tempDernierEnvoiTempCaptSolaire=millis();
+  }
 }
 
 

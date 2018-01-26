@@ -2,6 +2,9 @@
 
 */
 
-
-#define NODE_CHAUFFE_EAU 101
+// numero de noeud
 #define NODE_CAPTEUR_SOLAIRE 201
+
+//numero des senseurs
+// gateway
+#define S_TEMP_CAPT_SOLAIRE_VALIDE 0
