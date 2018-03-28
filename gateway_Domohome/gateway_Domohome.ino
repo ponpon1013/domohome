@@ -69,9 +69,23 @@
 #include <EEPROM.h>
 #include <SPI.h>
 #include <ArduinoOTA.h>
+#include <DallasTemperature.h>
+
+// Data wire is plugged into port 2 on the Arduino
+#define ONE_WIRE_BUS D3
+
+// Setup a oneWire instance to communicate with any OneWire devices (not just Maxim/Dallas temperature ICs)
+OneWire oneWire(ONE_WIRE_BUS);
+
+// Pass our oneWire reference to Dallas Temperature. 
+DallasTemperature sensors(&oneWire);
+
+
+#include <Ticker.h>
+Ticker TempTick;
 
 // Enable debug prints to serial monitor
-#define MY_DEBUG 
+//#define MY_DEBUG 
 
 // Use a bit lower baudrate for serial prints on ESP8266 than default in MyConfig.h
 #define MY_BAUD_RATE 9600
@@ -136,19 +150,101 @@
   #include <ESP8266WiFi.h>
 #endif
 
+//on utilise la platine ESP8266 avec registre a decalge
+#define USE_PLATINE
+
 // fichier en tête gerant les numero de neoud du systeme
 #include "domohome.h"
+
+
+//nombre d'actionneurs
+#define NB_ACTIONNEUR 4
+
+#define RESOLUTION 9 // temperature resolution
+#define COMPARE_TEMP 0 // Send temperature only if changed? 1 = Yes 0 = No
+#define MAX_ATTACHED_DS18B20 16 // maximum de capteur sur la ligne
+
+//unsigned long SLEEP_TIME = 60000; // Sleep time between reads (in milliseconds)
+
+
+// variable glaobales ---------------------------------------------------------------------------------------
 
 //variable temperatureCapteurSolaire provenant du noeud Capteusolaire (numero neoud dans fichier domohome.h)
 float TempCaptSolaire=15.0; // 15.0 valeur par defaut
 // variable tempDernierEnvoiTempCaptSolaire qui sait la derniere fois qu'on a eu l'info de TempCaptSolaire
+
+float lastTemperature[MAX_ATTACHED_DS18B20]; // tableau qui stocke les temprature
+
+//nbre de capteur temperature detecte
+int8_t numSensors=0;//nombre de capteur trouves
+
+// tableau des adresse des capteur de temperature
+DeviceAddress Thermometer[MAX_ATTACHED_DS18B20];
+
+//tableau  de valeur sur les capteur de temperature relevées
+float tabTemp[MAX_ATTACHED_DS18B20];
+
 long tempDernierEnvoiTempCaptSolaire;
+
+volatile int tabActionneurIndex[NB_ACTIONNEUR];
+volatile bool tabActionneurState[NB_CAPTEUR];
+
+
+
+
+//fin variable globale -------------------------------------------------------------------------------------
 // contante temps à ne pas dépasser sans reception de TempCaptSolaire
 #define TEMP_MAX_RECEPTION_CAPTEUR_SOLAIRE 1800000.0 //1800000=30 mn
 
 #include <MySensors.h>
 
-//fonction qui verifie que le dernier envoi de capteur solaire n'est pas trop ancien
+void SenTAddressController(DeviceAddress deviceAddress,int numero)
+{
+  char toSend[256];
+  char val[256];
+  strcpy (toSend,"");
+  for (uint8_t i = 0; i < 8; i++)
+  {
+    // zero pad the address if necessary
+    if (deviceAddress[i] < 16) strcat(toSend,"0");;
+    itoa(deviceAddress[i],val,16);
+    strcat (toSend,val);
+    strcat(toSend," ");
+   }
+  MyMessage msgInfo(S_TEXT_TEMP_CHAUFFE_EAU_BAS + numero,V_TEXT);
+  send(msgInfo.set(toSend));
+}
+
+void getTemp()
+{
+  int i;
+   
+  sensors.requestTemperatures(); // Send the command to get temperatures
+
+  for (i=0;i<numSensors;i++)
+  {
+    SenTAddressController(Thermometer[i],i);
+    tabTemp[i]= sensors.getTempC(Thermometer[i]);
+    MyMessage msgTemp(S_TEMP_CHAUFFE_EAU_BAS + i,V_TEMP);
+    send(msgTemp.set(tabTemp[i],1));
+   }
+}
+
+#ifdef MY_DEBUG 
+// function to print a device address
+void printAddress(DeviceAddress deviceAddress)
+{
+  for (uint8_t i = 0; i < 8; i++)
+  {
+    // zero pad the address if necessary
+    if (deviceAddress[i] < 16) Serial.print("0");
+    Serial.print(deviceAddress[i], HEX);
+    Serial.print(" ");
+  }
+  Serial.println("");
+}
+#endif
+
 bool TestTempEnvoieCaptSoalire()
 {
    if((millis() - tempDernierEnvoiTempCaptSolaire) > TEMP_MAX_RECEPTION_CAPTEUR_SOLAIRE)
@@ -161,10 +257,32 @@ bool TestTempEnvoieCaptSoalire()
    }
 }
 
+void RegistreWrite(int numberToDisplay)
+{
+  // on met le nombre sous 8 bit
+  numberToDisplay=numberToDisplay & 255;
+  // the LEDs don't change while you're sending in bits:
+    digitalWrite(clockPin, LOW);
+    digitalWrite(latchPin, LOW);
+    // shift out the bits:
+    shiftOut(dataPin, clockPin, LSBFIRST, numberToDisplay);  
+
+    //take the latch pin high so the LEDs will light up:
+    digitalWrite(latchPin, HIGH);
+}
+
+void before()
+{
+  // Startup up the OneWire library
+  sensors.begin();
+  sensors.setResolution(RESOLUTION);
+}
+
 void setup() { 
-  
+ 
+  #ifdef MYDEBUG  
   ArduinoOTA.onStart([]() {
-    Serial.println("ArduinoOTA start");
+   Serial.println("ArduinoOTA start"); 
   });
   ArduinoOTA.onEnd([]() {
     Serial.println("\nArduinoOTA end");
@@ -180,20 +298,93 @@ void setup() {
     else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive Failed");
     else if (error == OTA_END_ERROR) Serial.println("End Failed");
   });
+  #endif
   ArduinoOTA.begin();
+#ifdef MYDEBUG  
   Serial.println("Ready");
   Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
-
+#endif
   //initilaisation de tempDernierEnvoiTempCaptSolaire
-  tempDernierEnvoiTempCaptSolaire=millis();
+  //tempDernierEnvoiTempCaptSolaire=millis();
+
+  //set pins to output so you can control the shift register
+  pinMode(latchPin, OUTPUT);
+  pinMode(clockPin, OUTPUT);
+  pinMode(dataPin, OUTPUT);
+
+   // on met le regsitre à 1 pour tout etéindre ( etat haut ferme)
+  RegistreWrite(255);
+    
+  //initilaisation indexActionneur
+  tabActionneurIndex[0]=S_REMPLIR;
+  tabActionneurIndex[1]=S_VIDER;
+  tabActionneurIndex[2]=S_CIRCULER;
+  tabActionneurIndex[3]=S_CHAUFFER;
+  
+  //initilaisation des actionneur à 0
+  int i;
+  for (i=0;i<NB_ACTIONNEUR;i++)
+  {
+    tabActionneurState[tabActionneurIndex[i]]=false;
+  }
+
+  change=false;
+  data=255;
+
+  // mise en ràoute du timer Ticker
+  TempTick.attach(60, getTemp);
 }
 
 void presentation() {
+    int i;
   // Present locally attached sensors here
 
-  // senseur virtuel qui indique si la derniere recpetion de capteur soalire est trop ancienne
+
+  // Fetch the number of attached temperature sensors  
+  numSensors = sensors.getDeviceCount();
+  #ifdef MYDEBUG  
+  Serial.print("nbre capteur trouvés:");
+  Serial.println(numSensors);
+  #endif
+  // Present all sensors to controller
+   for (i=0;i<numSensors;i++)
+  {
+    
+    if (!sensors.getAddress(Thermometer[i], i)) 
+    {
+      #ifdef MYDEBUG  
+      Serial.print("Unable to find address for Device");
+      Serial.println(i);
+      #endif
+    }
+    else
+    {
+      present(S_TEMP_CHAUFFE_EAU_BAS + i, S_TEMP);
+      tabTemp[i]=15.0; // valeur par défaut de temperature
+      #ifdef MYDEBUG  
+      printAddress(Thermometer[i]);
+      #endif
+      sensors.setResolution(Thermometer[i], RESOLUTION);
+    }
+    
+  }
+ 
+  // senseur virtuel qui indique si la derniere recpetion de capteur solaire est trop ancienne
   present(S_TEMP_CAPT_SOLAIRE_VALIDE, S_TEMP);
+
+  //actionneur---------------------------------------------
+  
+  for (i=0;i<NB_ACTIONNEUR;i++)
+  {
+    present(tabActionneurIndex[i], S_BINARY);
+  }
+  // fin présensataton actionneur--------------------------
+
+  // presentation texte
+  present(S_TEXT_TEMP_CHAUFFE_EAU_BAS, S_INFO);
+  present(S_TEXT_TEMP_CHAUFFE_EAU_HAUT, S_INFO);
+
 }
 
 
@@ -203,24 +394,91 @@ void loop() {
 
   //lance la vérification de la validité de tempcaptsolaire
   // si valide on envoie au controller vali sinon non-valide
-  MyMessage msgValTempCaptSolaire(S_TEMP_CAPT_SOLAIRE_VALIDE,V_STATUS);
-  send(msgValTempCaptSolaire.set(TestTempEnvoieCaptSoalire()));
+  //MyMessage msgValTempCaptSolaire(S_TEMP_CAPT_SOLAIRE_VALIDE,V_STATUS);
+  //send(msgValTempCaptSolaire.set(TestTempEnvoieCaptSoalire()));
+
+  
+  // on renvoi au controleur l'etat des actionneur
+   int i;
+   
+  int datawrite; // data à ecrire sur data 
+  if (change)
+  {
+    #ifdef MYDEBUG  
+    Serial.println("change detecté");
+    Serial.print("data AVANT:");
+    Serial.println(data,BIN);
+    #endif
+    
+    //on actionne les actionneur  à actionner
+    data=0;
+    for (i=NB_ACTIONNEUR-1;i>=0;i--)
+    {
+      #ifdef MYDEBUG  
+      Serial.print("i:");
+      Serial.print(i);
+      Serial.print(" etat actionneur:");
+      Serial.print(tabActionneurState[tabActionneurIndex[i]]);
+      Serial.print("data avant");
+      Serial.print(data,BIN);
+      #endif
+      datawrite=tabActionneurState[tabActionneurIndex[i]] << i;
+      data=data | datawrite;
+      #ifdef MYDEBUG  
+      Serial.print("data apres ecriture");
+      Serial.print(data,BIN);
+      #endif
+    }
+    data = data ^255 ;
+    #ifdef MYDEBUG  
+    Serial.println("change detecté");
+    Serial.print("data apres:");
+    Serial.println(data,BIN);
+    #endif
+    // on inverse data car l'état haut est à la masse
+    
+    RegistreWrite(data);
+  
+    for (i=0;i<NB_ACTIONNEUR;i++)
+    {
+      MyMessage msgActioneur(tabActionneurIndex[i],V_STATUS);
+      send(msgActioneur.set(tabActionneurState[tabActionneurIndex[i]]));
+    }
+    change=false;
+  }
  }
 
 
 void receive(const MyMessage &message){
+  #ifdef MYDEBUG  
   Serial.println("Message reçu");
   Serial.print("envoyeur:"); Serial.println(message.sender);
   Serial.print("type:"); Serial.println(message.type);
   Serial.print("senseur:"); Serial.println(message.sensor);
   Serial.print("valeur:"); Serial.println(message.getFloat());
-
+  #endif
   if (message.sender==201 && message.type==V_TEMP) // message venant de capteurSolaire
   {
     TempCaptSolaire=message.getFloat();
     //on reinitialise la nouvelle date de réception de capteur solaire
     tempDernierEnvoiTempCaptSolaire=millis();
   }
+
+//message venant du controlleur
+   if (message.type==V_STATUS) // message venant de capteurSolaire
+  {
+    // on récupere l'actionneur concerné et on le change d'etat
+    int i;
+    for (i=0;i<NB_ACTIONNEUR;i++)
+    {
+     if (message.sensor==tabActionneurIndex[i])
+     {
+      tabActionneurState[tabActionneurIndex[i]]=message.getBool();
+      change=true;
+     }
+    }
+  }
+  
 }
 
 
