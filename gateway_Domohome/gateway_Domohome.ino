@@ -69,19 +69,12 @@
 #include <EEPROM.h>
 #include <SPI.h>
 #include <ArduinoOTA.h>
-//#include <DallasTemperature.h>
 
 #define RESOLUTION 9 // temperature resolution à definir avant d'appeler tempLib.h
 // Data wire is plugged into port 2 on the Arduino à definir avant d'appeler tempLib.h
 #define ONE_WIRE_BUS D3
 #include "tempLib.h"
-
-// Setup a oneWire instance to communicate with any OneWire devices (not just Maxim/Dallas temperature ICs)
-//OneWire oneWire(ONE_WIRE_BUS);
-
-// Pass our oneWire reference to Dallas Temperature. 
-//DallasTemperature sensors(&oneWire);
-
+#include "actionneur.h"
 
 #include <Ticker.h>
 Ticker TempTick;
@@ -135,7 +128,6 @@ Ticker TempTick;
 // Digital pin used for inclusion mode button
 //#define MY_INCLUSION_MODE_BUTTON_PIN  3 
 
- 
 // Flash leds on rx/tx/err
 // #define MY_LEDS_BLINKING_FEATURE
 // Set blinking period
@@ -158,15 +150,12 @@ Ticker TempTick;
 // fichier en tête gerant les numero de neoud du systeme
 #include "domohome.h"
 
-
 //nombre d'actionneurs
 #define NB_ACTIONNEUR 4
-
 
 #define COMPARE_TEMP 0 // Send temperature only if changed? 1 = Yes 0 = No
 
 //unsigned long SLEEP_TIME = 60000; // Sleep time between reads (in milliseconds)
-
 
 // variable glaobales ---------------------------------------------------------------------------------------
 
@@ -177,11 +166,18 @@ float TempCaptSolaire=15.0; // 15.0 valeur par defaut
 long tempDernierEnvoiTempCaptSolaire;
 
 volatile int tabActionneurIndex[NB_ACTIONNEUR];
-volatile bool tabActionneurState[NB_CAPTEUR];
+actionneur tabActionneur[NB_CAPTEUR];
 
 TempCapteur capteur; // creation de l'objet capteur de la lib tempLib.h
 
 //fin variable globale -------------------------------------------------------------------------------------
+
+// position des pin des actionneurs sur le regitre à dédcalage
+#define PIN_REMPLIR 3
+#define PIN_VIDER 2
+#define PIN_CHAUFFER 1
+#define PIN_CIRCULER 0
+
 // contante temps à ne pas dépasser sans reception de TempCaptSolaire
 
 #define TEMP_MAX_RECEPTION_CAPTEUR_SOLAIRE 1800000.0 //1800000=30 mn
@@ -203,21 +199,6 @@ void getTemp()
    }
 }
 
-#ifdef MY_DEBUG 
-// function to print a device address
-void printAddress(DeviceAddress deviceAddress)
-{
-  for (uint8_t i = 0; i < 8; i++)
-  {
-    // zero pad the address if necessary
-    if (deviceAddress[i] < 16) Serial.print("0");
-    Serial.print(deviceAddress[i], HEX);
-    Serial.print(" ");
-  }
-  Serial.println("");
-}
-#endif
-
 bool TestTempEnvoieCaptSoalire()
 {
    if((millis() - tempDernierEnvoiTempCaptSolaire) > TEMP_MAX_RECEPTION_CAPTEUR_SOLAIRE)
@@ -238,7 +219,7 @@ void RegistreWrite(int numberToDisplay)
     digitalWrite(clockPin, LOW);
     digitalWrite(latchPin, LOW);
     // shift out the bits:
-    shiftOut(dataPin, clockPin, LSBFIRST, numberToDisplay);  
+    shiftOut(dataPin, clockPin, MSBFIRST, numberToDisplay);  
 
     //take the latch pin high so the LEDs will light up:
     digitalWrite(latchPin, HIGH);
@@ -290,16 +271,21 @@ void setup() {
   RegistreWrite(255);
     
   //initilaisation indexActionneur
-  tabActionneurIndex[0]=S_REMPLIR;
-  tabActionneurIndex[1]=S_VIDER;
-  tabActionneurIndex[2]=S_CIRCULER;
-  tabActionneurIndex[3]=S_CHAUFFER;
+  tabActionneur[0].setNumeroNoeud(S_REMPLIR);
+  tabActionneur[1].setNumeroNoeud(S_VIDER);
+  tabActionneur[2].setNumeroNoeud(S_CIRCULER);
+  tabActionneur[3].setNumeroNoeud(S_CHAUFFER);
   
+  tabActionneur[0].setNumeroPin(PIN_REMPLIR);
+  tabActionneur[1].setNumeroPin(PIN_VIDER);
+  tabActionneur[2].setNumeroPin(PIN_CIRCULER);
+  tabActionneur[3].setNumeroPin(PIN_CHAUFFER);
+    
   //initilaisation des actionneur à 0
   int i;
   for (i=0;i<NB_ACTIONNEUR;i++)
   {
-    tabActionneurState[tabActionneurIndex[i]]=false;
+    tabActionneur[i].state=false;
   }
 
   change=false;
@@ -313,15 +299,7 @@ void presentation() {
     int i;
   // Present locally attached sensors here
 
-
-  // Fetch the number of attached temperature sensors  
-  //numSensors = sensors.getDeviceCount();
-  /*#ifdef MYDEBUG  
-  Serial.print("nbre capteur trouvés:");
-  Serial.println(numSensors);
-  #endif*/
-  // Present all sensors to controller
-   for (i=0;i<capteur.numSensors;i++)
+  for (i=0;i<capteur.numSensors;i++)
   {
     present(S_TEMP_CHAUFFE_EAU_BAS + i, S_TEMP);
   }
@@ -333,7 +311,7 @@ void presentation() {
   
   for (i=0;i<NB_ACTIONNEUR;i++)
   {
-    present(tabActionneurIndex[i], S_BINARY);
+    present(tabActionneur[i].getNumeroNoeud(), S_BINARY);
   }
   // fin présensataton actionneur--------------------------
 
@@ -352,7 +330,6 @@ void loop() {
   // si valide on envoie au controller vali sinon non-valide
   //MyMessage msgValTempCaptSolaire(S_TEMP_CAPT_SOLAIRE_VALIDE,V_STATUS);
   //send(msgValTempCaptSolaire.set(TestTempEnvoieCaptSoalire()));
-
   
   // on renvoi au controleur l'etat des actionneur
    int i;
@@ -368,42 +345,20 @@ void loop() {
     
     //on actionne les actionneur  à actionner
     data=0;
-    for (i=NB_ACTIONNEUR-1;i>=0;i--)
-    {
-      #ifdef MYDEBUG  
-      Serial.print("i:");
-      Serial.print(i);
-      Serial.print(" etat actionneur:");
-      Serial.print(tabActionneurState[tabActionneurIndex[i]]);
-      Serial.print("data avant");
-      Serial.print(data,BIN);
-      #endif
-      datawrite=tabActionneurState[tabActionneurIndex[i]] << i;
-      data=data | datawrite;
-      #ifdef MYDEBUG  
-      Serial.print("data apres ecriture");
-      Serial.print(data,BIN);
-      #endif
-    }
-    data = data ^255 ;
-    #ifdef MYDEBUG  
-    Serial.println("change detecté");
-    Serial.print("data apres:");
-    Serial.println(data,BIN);
-    #endif
-    // on inverse data car l'état haut est à la masse
-    
-    RegistreWrite(data);
-  
     for (i=0;i<NB_ACTIONNEUR;i++)
     {
-      MyMessage msgActioneur(tabActionneurIndex[i],V_STATUS);
-      send(msgActioneur.set(tabActionneurState[tabActionneurIndex[i]]));
+      MyMessage msgActioneur(tabActionneur[i].getNumeroNoeud(),V_STATUS);
+      send(msgActioneur.set(tabActionneur[i].state));
+      datawrite=tabActionneur[i].state << tabActionneur[i].getNumeroPin();
+      data=data | datawrite;
     }
+    // on inverse data car l'état haut est à la masse
+    data = data ^255 ;
+       
+    RegistreWrite(data);
     change=false;
   }
  }
-
 
 void receive(const MyMessage &message){
   #ifdef MYDEBUG  
@@ -427,9 +382,9 @@ void receive(const MyMessage &message){
     int i;
     for (i=0;i<NB_ACTIONNEUR;i++)
     {
-     if (message.sensor==tabActionneurIndex[i])
+     if (message.sensor==tabActionneur[i].getNumeroNoeud())
      {
-      tabActionneurState[tabActionneurIndex[i]]=message.getBool();
+      tabActionneur[i].state=message.getBool();
       change=true;
      }
     }
