@@ -69,16 +69,18 @@
 #include <EEPROM.h>
 #include <SPI.h>
 #include <ArduinoOTA.h>
-#include <DallasTemperature.h>
+//#include <DallasTemperature.h>
 
-// Data wire is plugged into port 2 on the Arduino
+#define RESOLUTION 9 // temperature resolution à definir avant d'appeler tempLib.h
+// Data wire is plugged into port 2 on the Arduino à definir avant d'appeler tempLib.h
 #define ONE_WIRE_BUS D3
+#include "tempLib.h"
 
 // Setup a oneWire instance to communicate with any OneWire devices (not just Maxim/Dallas temperature ICs)
-OneWire oneWire(ONE_WIRE_BUS);
+//OneWire oneWire(ONE_WIRE_BUS);
 
 // Pass our oneWire reference to Dallas Temperature. 
-DallasTemperature sensors(&oneWire);
+//DallasTemperature sensors(&oneWire);
 
 
 #include <Ticker.h>
@@ -160,9 +162,8 @@ Ticker TempTick;
 //nombre d'actionneurs
 #define NB_ACTIONNEUR 4
 
-#define RESOLUTION 9 // temperature resolution
+
 #define COMPARE_TEMP 0 // Send temperature only if changed? 1 = Yes 0 = No
-#define MAX_ATTACHED_DS18B20 16 // maximum de capteur sur la ligne
 
 //unsigned long SLEEP_TIME = 60000; // Sleep time between reads (in milliseconds)
 
@@ -173,60 +174,32 @@ Ticker TempTick;
 float TempCaptSolaire=15.0; // 15.0 valeur par defaut
 // variable tempDernierEnvoiTempCaptSolaire qui sait la derniere fois qu'on a eu l'info de TempCaptSolaire
 
-float lastTemperature[MAX_ATTACHED_DS18B20]; // tableau qui stocke les temprature
-
-//nbre de capteur temperature detecte
-int8_t numSensors=0;//nombre de capteur trouves
-
-// tableau des adresse des capteur de temperature
-DeviceAddress Thermometer[MAX_ATTACHED_DS18B20];
-
-//tableau  de valeur sur les capteur de temperature relevées
-float tabTemp[MAX_ATTACHED_DS18B20];
-
 long tempDernierEnvoiTempCaptSolaire;
 
 volatile int tabActionneurIndex[NB_ACTIONNEUR];
 volatile bool tabActionneurState[NB_CAPTEUR];
 
-
-
+TempCapteur capteur; // creation de l'objet capteur de la lib tempLib.h
 
 //fin variable globale -------------------------------------------------------------------------------------
 // contante temps à ne pas dépasser sans reception de TempCaptSolaire
+
 #define TEMP_MAX_RECEPTION_CAPTEUR_SOLAIRE 1800000.0 //1800000=30 mn
 
 #include <MySensors.h>
 
-void SenTAddressController(DeviceAddress deviceAddress,int numero)
-{
-  char toSend[256];
-  char val[256];
-  strcpy (toSend,"");
-  for (uint8_t i = 0; i < 8; i++)
-  {
-    // zero pad the address if necessary
-    if (deviceAddress[i] < 16) strcat(toSend,"0");;
-    itoa(deviceAddress[i],val,16);
-    strcat (toSend,val);
-    strcat(toSend," ");
-   }
-  MyMessage msgInfo(S_TEXT_TEMP_CHAUFFE_EAU_BAS + numero,V_TEXT);
-  send(msgInfo.set(toSend));
-}
-
 void getTemp()
 {
   int i;
-   
-  sensors.requestTemperatures(); // Send the command to get temperatures
-
-  for (i=0;i<numSensors;i++)
+  for (i=0;i<capteur.numSensors;i++)
   {
-    SenTAddressController(Thermometer[i],i);
-    tabTemp[i]= sensors.getTempC(Thermometer[i]);
+    //on envoie les temperatures
     MyMessage msgTemp(S_TEMP_CHAUFFE_EAU_BAS + i,V_TEMP);
-    send(msgTemp.set(tabTemp[i],1));
+    send(msgTemp.set(capteur.getTemp(i),1));
+
+    //on envoie les adresses
+    MyMessage msgTempText(S_TEXT_TEMP_CHAUFFE_EAU_BAS + i,V_TEXT);
+    send(msgTempText.set(capteur.getAdress(i)));
    }
 }
 
@@ -274,8 +247,8 @@ void RegistreWrite(int numberToDisplay)
 void before()
 {
   // Startup up the OneWire library
-  sensors.begin();
-  sensors.setResolution(RESOLUTION);
+  /*sensors.begin();
+  sensors.setResolution(RESOLUTION);*/
 }
 
 void setup() { 
@@ -342,34 +315,17 @@ void presentation() {
 
 
   // Fetch the number of attached temperature sensors  
-  numSensors = sensors.getDeviceCount();
-  #ifdef MYDEBUG  
+  //numSensors = sensors.getDeviceCount();
+  /*#ifdef MYDEBUG  
   Serial.print("nbre capteur trouvés:");
   Serial.println(numSensors);
-  #endif
+  #endif*/
   // Present all sensors to controller
-   for (i=0;i<numSensors;i++)
+   for (i=0;i<capteur.numSensors;i++)
   {
-    
-    if (!sensors.getAddress(Thermometer[i], i)) 
-    {
-      #ifdef MYDEBUG  
-      Serial.print("Unable to find address for Device");
-      Serial.println(i);
-      #endif
-    }
-    else
-    {
-      present(S_TEMP_CHAUFFE_EAU_BAS + i, S_TEMP);
-      tabTemp[i]=15.0; // valeur par défaut de temperature
-      #ifdef MYDEBUG  
-      printAddress(Thermometer[i]);
-      #endif
-      sensors.setResolution(Thermometer[i], RESOLUTION);
-    }
-    
+    present(S_TEMP_CHAUFFE_EAU_BAS + i, S_TEMP);
   }
- 
+  
   // senseur virtuel qui indique si la derniere recpetion de capteur solaire est trop ancienne
   present(S_TEMP_CAPT_SOLAIRE_VALIDE, S_TEMP);
 
